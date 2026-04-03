@@ -21,33 +21,53 @@ LOADER_MAP = {
 }
 
 
-def load_and_split_documents() -> list:
+def list_knowledge_bases() -> list[str]:
     knowledge_dir = Path(settings.knowledge_dir)
     if not knowledge_dir.exists():
-        logger.warning("Knowledge directory %s does not exist", knowledge_dir)
         return []
+    return sorted(
+        d.name for d in knowledge_dir.iterdir() if d.is_dir() and not d.name.startswith(".")
+    )
 
+
+def _load_files_from_dir(directory: Path) -> list:
     documents = []
-    files = list(knowledge_dir.iterdir())
-    doc_count = 0
-
-    for file_path in files:
+    for file_path in directory.iterdir():
+        if file_path.is_dir():
+            continue
         if file_path.suffix.lower() not in LOADER_MAP:
             logger.debug("Skipping unsupported file: %s", file_path.name)
             continue
 
         try:
             loader_factory = LOADER_MAP[file_path.suffix.lower()]
-            if callable(loader_factory) and file_path.suffix.lower() == ".json":
-                loader = loader_factory(str(file_path))
-            else:
-                loader = loader_factory(str(file_path))
+            loader = loader_factory(str(file_path))
             docs = loader.load()
             documents.extend(docs)
-            doc_count += 1
             logger.info("Loaded %d pages from %s", len(docs), file_path.name)
         except Exception:
             logger.warning("Failed to load %s, skipping", file_path.name, exc_info=True)
+
+    return documents
+
+
+def load_and_split_documents(knowledge_name: str | None = None) -> list:
+    knowledge_dir = Path(settings.knowledge_dir)
+    if not knowledge_dir.exists():
+        logger.warning("Knowledge directory %s does not exist", knowledge_dir)
+        return []
+
+    if knowledge_name:
+        target_dir = knowledge_dir / knowledge_name
+        if not target_dir.is_dir():
+            raise FileNotFoundError(f"Knowledge base '{knowledge_name}' not found")
+        documents = _load_files_from_dir(target_dir)
+    else:
+        # Load from all subfolders
+        documents = []
+        for subdir in knowledge_dir.iterdir():
+            if subdir.is_dir() and not subdir.name.startswith("."):
+                documents.extend(_load_files_from_dir(subdir))
 
     if not documents:
         return []
@@ -57,5 +77,5 @@ def load_and_split_documents() -> list:
         chunk_overlap=settings.chunk_overlap,
     )
     chunks = splitter.split_documents(documents)
-    logger.info("Split %d documents into %d chunks", doc_count, len(chunks))
+    logger.info("Split %d documents into %d chunks", len(documents), len(chunks))
     return chunks

@@ -47,7 +47,22 @@ All other settings have sensible defaults. See [Configuration](#configuration) f
 
 ### 5. Add documents to the knowledge base
 
-Place your documents in the `knowledge/` folder. Supported formats:
+Create subfolders inside `knowledge/` for each knowledge base. Each subfolder becomes a separately queryable collection:
+
+```
+knowledge/
+├── faq/
+│   ├── general.txt
+│   └── pricing.md
+├── mahabharata/
+│   ├── chapter1.txt
+│   └── chapter2.pdf
+└── sample/
+    ├── sample.txt
+    └── sample.md
+```
+
+Supported formats:
 
 | Format | Extension | Notes |
 |--------|-----------|-------|
@@ -56,7 +71,7 @@ Place your documents in the `knowledge/` folder. Supported formats:
 | PDF | `.pdf` | Requires `poppler-utils` system package for some PDFs |
 | JSON | `.json` | Loaded via jq-style parsing |
 
-Sample files are included in `knowledge/` to get started.
+Sample files are included in `knowledge/sample/` to get started.
 
 ### 6. Start the server
 
@@ -69,7 +84,13 @@ On first startup, the embedding model is loaded into memory. This takes a few se
 ### 7. Load the knowledge base
 
 ```bash
+# Refresh all knowledge bases
 curl -X POST http://localhost:8000/refresh-knowledge
+
+# Refresh a specific knowledge base
+curl -X POST http://localhost:8000/refresh-knowledge \
+  -H 'Content-Type: application/json' \
+  -d '{"knowledge": "sample"}'
 ```
 
 Expected response:
@@ -77,24 +98,35 @@ Expected response:
 ```json
 {
   "status": "success",
+  "knowledge": "sample",
   "doc_count": 2,
   "chunk_count": 3,
   "processing_time": 1.25
 }
 ```
 
-### 8. Ask questions
+### 8. List available knowledge bases
 
 ```bash
-# Standard response (returns answer + source documents)
+curl http://localhost:8000/knowledge
+```
+
+```json
+{"knowledge_bases": ["faq", "mahabharata", "sample"]}
+```
+
+### 9. Ask questions
+
+```bash
+# Query a specific knowledge base
 curl -X POST http://localhost:8000/ask \
   -H 'Content-Type: application/json' \
-  -d '{"question": "What is RAG?"}'
+  -d '{"question": "What is RAG?", "knowledge": "sample"}'
 
 # Streaming response (Server-Sent Events)
 curl -N -X POST http://localhost:8000/ask \
   -H 'Content-Type: application/json' \
-  -d '{"question": "What is RAG?", "stream": true}'
+  -d '{"question": "What is RAG?", "knowledge": "sample", "stream": true}'
 
 # Health check
 curl http://localhost:8000/health
@@ -144,17 +176,42 @@ curl http://localhost:8000/health
 {"status": "ok"}
 ```
 
-### `POST /refresh-knowledge`
+### `GET /knowledge`
 
-Clears the vector store and reloads all documents from the `knowledge/` folder.
+Lists all available knowledge bases (subfolders in `knowledge/`).
 
 ```bash
+curl http://localhost:8000/knowledge
+```
+
+```json
+{"knowledge_bases": ["faq", "mahabharata", "sample"]}
+```
+
+### `POST /refresh-knowledge`
+
+Reloads documents into the vector store. Pass `knowledge` to refresh a single knowledge base, or omit to refresh all.
+
+**Request body:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `knowledge` | string | `null` | Specific knowledge base to refresh. Omit to refresh all. |
+
+```bash
+# Refresh all
 curl -X POST http://localhost:8000/refresh-knowledge
+
+# Refresh specific
+curl -X POST http://localhost:8000/refresh-knowledge \
+  -H 'Content-Type: application/json' \
+  -d '{"knowledge": "faq"}'
 ```
 
 ```json
 {
   "status": "success",
+  "knowledge": "faq",
   "doc_count": 2,
   "chunk_count": 5,
   "processing_time": 2.48
@@ -163,13 +220,14 @@ curl -X POST http://localhost:8000/refresh-knowledge
 
 ### `POST /ask`
 
-Ask a question against the loaded knowledge base.
+Ask a question against a specific knowledge base.
 
 **Request body:**
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `question` | string (1-2000 chars) | *required* | The question to ask |
+| `knowledge` | string | *required* | Knowledge base to query (e.g. `"faq"`, `"mahabharata"`) |
 | `top_k` | integer (1-20) | `4` | Number of document chunks to retrieve |
 | `stream` | boolean | `false` | Enable Server-Sent Events streaming |
 
@@ -178,7 +236,7 @@ Ask a question against the loaded knowledge base.
 ```bash
 curl -X POST http://localhost:8000/ask \
   -H 'Content-Type: application/json' \
-  -d '{"question": "What are the benefits of RAG?", "top_k": 4}'
+  -d '{"question": "What are the benefits of RAG?", "knowledge": "sample", "top_k": 4}'
 ```
 
 **Standard response:**
@@ -189,7 +247,7 @@ curl -X POST http://localhost:8000/ask \
   "sources": [
     {
       "content": "chunk text...",
-      "metadata": {"source": "knowledge/sample.txt"}
+      "metadata": {"source": "knowledge/sample/sample.txt"}
     }
   ]
 }
@@ -200,7 +258,7 @@ curl -X POST http://localhost:8000/ask \
 ```bash
 curl -N -X POST http://localhost:8000/ask \
   -H 'Content-Type: application/json' \
-  -d '{"question": "What is RAG?", "stream": true}'
+  -d '{"question": "What is RAG?", "knowledge": "sample", "stream": true}'
 ```
 
 **Streaming response (SSE):**
@@ -267,7 +325,7 @@ app/
 └── middleware/
     ├── error_handler.py    # Global exception → JSON responses
     └── rate_limiter.py     # SlowAPI rate limiting
-knowledge/                  # Source documents (.txt, .md, .pdf, .json)
+knowledge/                  # Knowledge bases (each subfolder = one knowledge base)
 chroma_db/                  # Persisted vector DB (auto-created)
 ```
 
@@ -294,17 +352,20 @@ Exceeding the limit returns `429 Too Many Requests`.
 
 
 
-#### RUN LOCALLY                                                        
-    cd /Users/kousthubshetty/development/learn-RAG                              
+#### RUN LOCALLY                              
                                                                                 
-    # 2. Activate virtual environment                                           
-    source .venv/bin/activate                                                   
-                                                                                
-    # 3. Install dependencies (if not already done)                             
-    pip install -r requirements.txt                                             
-                                                                                
-    # 4. Start the server
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
+  # List knowledge bases
+  curl http://localhost:8000/knowledge
 
-    # 5. (In another terminal) Load the knowledge base
-    curl -X POST http://localhost:8000/refresh-knowledge
+  # Ask against specific knowledge
+  curl -X POST http://localhost:8000/ask \
+    -H 'Content-Type: application/json' \
+    -d '{"question": "What is RAG?", "knowledge": "sample"}'
+
+  # Refresh one knowledge base
+  curl -X POST http://localhost:8000/refresh-knowledge \
+    -H 'Content-Type: application/json' \
+    -d '{"knowledge": "faq"}'
+
+  # Refresh all
+  curl -X POST http://localhost:8000/refresh-knowledge

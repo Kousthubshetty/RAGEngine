@@ -13,6 +13,11 @@ class AskResponse(BaseModel):
 
 class RefreshResponse(BaseModel):
     status: str
+    knowledge: str | list[str]
     doc_count: int
     chunk_count: int
     processing_time: float
+
+
+class KnowledgeListResponse(BaseModel):
+    knowledge_bases: list[str]

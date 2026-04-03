@@ -39,8 +39,8 @@ class RAGService:
             ("human", USER_TEMPLATE),
         ])
 
-    def _build_chain(self, top_k: int):
-        retriever = self._vectorstore.as_retriever(top_k=top_k)
+    def _build_chain(self, knowledge: str, top_k: int):
+        retriever = self._vectorstore.as_retriever(knowledge_name=knowledge, top_k=top_k)
         return (
             {"context": retriever | _format_docs, "question": RunnablePassthrough()}
             | self._prompt
@@ -48,9 +48,9 @@ class RAGService:
             | StrOutputParser()
         )
 
-    async def query(self, question: str, top_k: int = 4) -> AskResponse:
-        chain = self._build_chain(top_k)
-        source_docs = self._vectorstore.similarity_search(question, top_k=top_k)
+    async def query(self, question: str, knowledge: str, top_k: int = 4) -> AskResponse:
+        chain = self._build_chain(knowledge, top_k)
+        source_docs = self._vectorstore.similarity_search(question, knowledge_name=knowledge, top_k=top_k)
         answer = await chain.ainvoke(question)
 
         sources = [
@@ -59,9 +59,9 @@ class RAGService:
         ]
         return AskResponse(answer=answer, sources=sources)
 
-    async def stream_query(self, question: str, top_k: int = 4):
-        chain = self._build_chain(top_k)
-        source_docs = self._vectorstore.similarity_search(question, top_k=top_k)
+    async def stream_query(self, question: str, knowledge: str, top_k: int = 4):
+        chain = self._build_chain(knowledge, top_k)
+        source_docs = self._vectorstore.similarity_search(question, knowledge_name=knowledge, top_k=top_k)
 
         try:
             async for token in chain.astream(question):

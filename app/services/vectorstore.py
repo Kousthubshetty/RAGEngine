@@ -6,62 +6,97 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
 from app.config import settings
-from app.services.document_loader import load_and_split_documents
+from app.services.document_loader import load_and_split_documents, list_knowledge_bases
 
 logger = logging.getLogger(__name__)
+
+
+def _collection_name(knowledge_name: str) -> str:
+    return f"knowledge_{knowledge_name}"
 
 
 class VectorStoreService:
     def __init__(self):
         self._embeddings = HuggingFaceEmbeddings(model_name=settings.embedding_model)
         self._client = chromadb.PersistentClient(path=settings.chroma_persist_dir)
-        self._collection_name = "knowledge"
-        self._vectorstore = Chroma(
-            client=self._client,
-            collection_name=self._collection_name,
-            embedding_function=self._embeddings,
-        )
+        self._vectorstores: dict[str, Chroma] = {}
         self._cache: TTLCache = TTLCache(maxsize=128, ttl=300)
 
-    def clear_and_reload(self) -> tuple[int, int]:
-        # Delete existing collection and recreate
-        try:
-            self._client.delete_collection(self._collection_name)
-        except ValueError:
-            pass  # Collection doesn't exist yet
-
-        chunks = load_and_split_documents()
-        if not chunks:
-            self._vectorstore = Chroma(
+        # Initialize vectorstores for existing knowledge bases
+        for kb in list_knowledge_bases():
+            col = _collection_name(kb)
+            self._vectorstores[kb] = Chroma(
                 client=self._client,
-                collection_name=self._collection_name,
+                collection_name=col,
+                embedding_function=self._embeddings,
+            )
+
+    def _get_or_create_vectorstore(self, knowledge_name: str) -> Chroma:
+        if knowledge_name not in self._vectorstores:
+            self._vectorstores[knowledge_name] = Chroma(
+                client=self._client,
+                collection_name=_collection_name(knowledge_name),
+                embedding_function=self._embeddings,
+            )
+        return self._vectorstores[knowledge_name]
+
+    def clear_and_reload(self, knowledge_name: str | None = None) -> tuple[int, int]:
+        if knowledge_name:
+            return self._reload_single(knowledge_name)
+        else:
+            return self._reload_all()
+
+    def _reload_single(self, knowledge_name: str) -> tuple[int, int]:
+        col = _collection_name(knowledge_name)
+        try:
+            self._client.delete_collection(col)
+        except ValueError:
+            pass
+
+        chunks = load_and_split_documents(knowledge_name)
+        if not chunks:
+            self._vectorstores[knowledge_name] = Chroma(
+                client=self._client,
+                collection_name=col,
                 embedding_function=self._embeddings,
             )
             return 0, 0
 
-        self._vectorstore = Chroma.from_documents(
+        self._vectorstores[knowledge_name] = Chroma.from_documents(
             documents=chunks,
             embedding=self._embeddings,
             client=self._client,
-            collection_name=self._collection_name,
+            collection_name=col,
         )
 
-        # Invalidate cache
-        self._cache.clear()
+        # Invalidate cache entries for this knowledge
+        keys_to_remove = [k for k in self._cache if k.startswith(f"{knowledge_name}::")]
+        for k in keys_to_remove:
+            del self._cache[k]
 
         doc_sources = {c.metadata.get("source", "") for c in chunks}
-        logger.info("Loaded %d chunks from %d documents", len(chunks), len(doc_sources))
+        logger.info("Loaded %d chunks from %d documents for '%s'", len(chunks), len(doc_sources), knowledge_name)
         return len(doc_sources), len(chunks)
 
-    def as_retriever(self, top_k: int | None = None):
-        k = top_k or settings.top_k
-        return self._vectorstore.as_retriever(search_kwargs={"k": k})
+    def _reload_all(self) -> tuple[int, int]:
+        total_docs, total_chunks = 0, 0
+        for kb in list_knowledge_bases():
+            docs, chunks = self._reload_single(kb)
+            total_docs += docs
+            total_chunks += chunks
+        return total_docs, total_chunks
 
-    def similarity_search(self, query: str, top_k: int | None = None):
+    def as_retriever(self, knowledge_name: str, top_k: int | None = None):
         k = top_k or settings.top_k
-        cache_key = f"{query}::{k}"
+        vs = self._get_or_create_vectorstore(knowledge_name)
+        return vs.as_retriever(search_kwargs={"k": k})
+
+    def similarity_search(self, query: str, knowledge_name: str, top_k: int | None = None):
+        k = top_k or settings.top_k
+        cache_key = f"{knowledge_name}::{query}::{k}"
         if cache_key in self._cache:
             return self._cache[cache_key]
-        results = self._vectorstore.similarity_search(query, k=k)
+        vs = self._get_or_create_vectorstore(knowledge_name)
+        results = vs.similarity_search(query, k=k)
         self._cache[cache_key] = results
         return results

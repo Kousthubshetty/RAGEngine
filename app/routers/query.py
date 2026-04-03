@@ -22,11 +22,11 @@ async def ask(
 ):
     if body.stream:
         return EventSourceResponse(
-            rag_service.stream_query(body.question, top_k=body.top_k),
+            rag_service.stream_query(body.question, knowledge=body.knowledge, top_k=body.top_k),
             media_type="text/event-stream",
         )
 
     response: AskResponse = await rag_service.query(
-        body.question, top_k=body.top_k,
+        body.question, knowledge=body.knowledge, top_k=body.top_k,
     )
     return response
