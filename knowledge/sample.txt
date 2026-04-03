@@ -1,0 +1,16 @@
+RAG (Retrieval-Augmented Generation) is a technique that combines information retrieval with text generation.
+It works by first retrieving relevant documents from a knowledge base, then using those documents as context
+for a large language model to generate accurate, grounded responses.
+
+Key benefits of RAG:
+- Reduces hallucination by grounding responses in actual documents
+- Allows the model to access up-to-date information beyond its training data
+- Provides source attribution for generated answers
+- More cost-effective than fine-tuning for many use cases
+
+Common RAG components:
+1. Document loader - ingests documents from various sources
+2. Text splitter - breaks documents into manageable chunks
+3. Embedding model - converts text into vector representations
+4. Vector store - stores and indexes embeddings for fast retrieval
+5. LLM - generates answers using retrieved context

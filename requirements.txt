@@ -1,0 +1,30 @@
+# Core
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+
+# LangChain
+langchain
+langchain-core
+langchain-anthropic
+langchain-chroma
+langchain-huggingface
+langchain-community
+
+# Vector DB & Embeddings
+chromadb
+sentence-transformers
+pypdf
+unstructured
+
+# Middleware & Utilities
+slowapi
+python-json-logger
+sse-starlette
+cachetools
+
+# Dev
+pytest
+pytest-asyncio
+httpx
